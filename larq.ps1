@@ -12,7 +12,7 @@ Add-Type -AssemblyName Microsoft.VisualBasic
 
 $script:LarqUrl = 'https://raw.githubusercontent.com/cariocadoido24/LarqOtimizer/main/larq.ps1'
 $script:AuthSalt = 'xM6D3Wd5RAqmOP8vhY27Qw=='
-$script:AuthHash = 'FWYLY+XQF8UubDidb5/riDMcYaMBuKHr1rXYe+jawbo='
+$script:AuthHash = '48ZXBOI29GgfwugsOa91D+/I0aumFlDDPtxhGP+erMk='
 $script:Iterations = 100000
 $script:OriginalReg = @{}
 $script:PrevProcCpu = @{}
