@@ -11,9 +11,7 @@ Add-Type -AssemblyName Microsoft.VisualBasic
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $script:LarqUrl = 'https://raw.githubusercontent.com/cariocadoido24/LarqOtimizer/main/larq.ps1'
-$script:AuthSalt = 'xM6D3Wd5RAqmOP8vhY27Qw=='
-$script:AuthHash = '48ZXBOI29GgfwugsOa91D+/I0aumFlDDPtxhGP+erMk='
-$script:Iterations = 100000
+$script:AuthHash = '4YQdpB1N5u4o1Ma7EZhFjNFj7NStpSSOgj8htCl5sXQ='
 $script:OriginalReg = @{}
 $script:PrevProcCpu = @{}
 $script:LastProcSample = Get-Date
@@ -96,12 +94,15 @@ function Confirm([string]$m){ return ([Windows.Forms.MessageBox]::Show($m,'LarqO
 # ---------- Seguranca/Login ----------
 function Test-LarqPassword([string]$Password){
     try {
-        $salt=[Convert]::FromBase64String($script:AuthSalt)
-        $pbkdf=New-Object Security.Cryptography.Rfc2898DeriveBytes($Password,$salt,$script:Iterations)
-        try {$got=$pbkdf.GetBytes(32)} finally {$pbkdf.Dispose()}
+        $sha=[Security.Cryptography.SHA256]::Create()
+        try {
+            $raw=[Text.Encoding]::UTF8.GetBytes('LarqOtimizer::v2::'+$Password)
+            $got=$sha.ComputeHash($raw)
+        } finally { $sha.Dispose() }
         $expected=[Convert]::FromBase64String($script:AuthHash)
         if($got.Length -ne $expected.Length){return $false}
-        $diff=0; for($i=0;$i -lt $got.Length;$i++){$diff=$diff -bor ($got[$i] -bxor $expected[$i])}
+        $diff=0
+        for($i=0;$i -lt $got.Length;$i++){$diff=$diff -bor ($got[$i] -bxor $expected[$i])}
         return ($diff -eq 0)
     } catch { return $false }
 }
@@ -112,14 +113,14 @@ function Show-Login {
     $title=New-Label 'LARQOTIMIZER  PRO' 19 $C.Cyan -Bold; $title.Location=New-Object Drawing.Point(115,45)
     $sub=New-Label 'Acesse para gerenciar e otimizar o sistema' 9 $C.Muted; $sub.Location=New-Object Drawing.Point(92,82)
     $uLab=New-Label 'Usuario' 9 $C.Muted; $uLab.Location=New-Object Drawing.Point(70,126)
-    $user=New-Object Windows.Forms.TextBox; $user.Location=New-Object Drawing.Point(70,150); $user.Size=New-Object Drawing.Size(320,34); $user.Text='larquitoS2'; $user.BackColor=$C.Surface2; $user.ForeColor=$C.Text; $user.BorderStyle='FixedSingle'; $user.Font=New-Object Drawing.Font('Segoe UI',11)
+    $user=New-Object Windows.Forms.TextBox; $user.Location=New-Object Drawing.Point(70,150); $user.Size=New-Object Drawing.Size(320,34); $user.Text='larquitoS2'; $user.ReadOnly=$true; $user.BackColor=$C.Surface2; $user.ForeColor=$C.Text; $user.BorderStyle='FixedSingle'; $user.Font=New-Object Drawing.Font('Segoe UI',11)
     $pLab=New-Label 'Senha' 9 $C.Muted; $pLab.Location=New-Object Drawing.Point(70,198)
     $pass=New-Object Windows.Forms.TextBox; $pass.Location=New-Object Drawing.Point(70,222); $pass.Size=New-Object Drawing.Size(320,34); $pass.UseSystemPasswordChar=$true; $pass.BackColor=$C.Surface2; $pass.ForeColor=$C.Text; $pass.BorderStyle='FixedSingle'; $pass.Font=New-Object Drawing.Font('Segoe UI',11)
     $status=New-Label '' 9 $C.Red; $status.Location=New-Object Drawing.Point(70,263); $status.MaximumSize=New-Object Drawing.Size(320,40)
     $btn=New-Button 'ENTRAR NO PAINEL' ({
         param($s,$e)
         $ctx=$s.Tag
-        if(($ctx.User.Text -ceq 'larquitoS2') -and (Test-LarqPassword $ctx.Pass.Text)){$ctx.Form.DialogResult='OK';$ctx.Form.Close()}else{$ctx.Status.Text='Usuario ou senha incorretos.';$ctx.Pass.Clear();$ctx.Pass.Focus()}
+        if(Test-LarqPassword $ctx.Pass.Text){$ctx.Form.DialogResult='OK';$ctx.Form.Close()}else{$ctx.Status.Text='Senha incorreta.';$ctx.Pass.Clear();$ctx.Pass.Focus()}
     }) -Primary
     $btn.Tag=[pscustomobject]@{Form=$f;User=$user;Pass=$pass;Status=$status}
     $btn.Location=New-Object Drawing.Point(70,300); $btn.Width=320; $btn.Height=44
