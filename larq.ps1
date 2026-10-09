@@ -112,16 +112,16 @@ function Show-Login {
     $title=New-Label 'LARQOTIMIZER  PRO' 19 $C.Cyan -Bold; $title.Location=New-Object Drawing.Point(115,45)
     $sub=New-Label 'Acesse para gerenciar e otimizar o sistema' 9 $C.Muted; $sub.Location=New-Object Drawing.Point(92,82)
     $uLab=New-Label 'Usuario' 9 $C.Muted; $uLab.Location=New-Object Drawing.Point(70,126)
-    $user=New-Object Windows.Forms.TextBox; $user.Location=New-Object Drawing.Point(70,150); $user.Size=New-Object Drawing.Size(320,34); $user.Text='larq'; $user.BackColor=$C.Surface2; $user.ForeColor=$C.Text; $user.BorderStyle='FixedSingle'; $user.Font=New-Object Drawing.Font('Segoe UI',11)
+    $user=New-Object Windows.Forms.TextBox; $user.Location=New-Object Drawing.Point(70,150); $user.Size=New-Object Drawing.Size(320,34); $user.Text='larquitoS2'; $user.BackColor=$C.Surface2; $user.ForeColor=$C.Text; $user.BorderStyle='FixedSingle'; $user.Font=New-Object Drawing.Font('Segoe UI',11)
     $pLab=New-Label 'Senha' 9 $C.Muted; $pLab.Location=New-Object Drawing.Point(70,198)
     $pass=New-Object Windows.Forms.TextBox; $pass.Location=New-Object Drawing.Point(70,222); $pass.Size=New-Object Drawing.Size(320,34); $pass.UseSystemPasswordChar=$true; $pass.BackColor=$C.Surface2; $pass.ForeColor=$C.Text; $pass.BorderStyle='FixedSingle'; $pass.Font=New-Object Drawing.Font('Segoe UI',11)
     $status=New-Label '' 9 $C.Red; $status.Location=New-Object Drawing.Point(70,263); $status.MaximumSize=New-Object Drawing.Size(320,40)
     $btn=New-Button 'ENTRAR NO PAINEL' ({
         param($s,$e)
         $ctx=$s.Tag
-        if(Test-LarqPassword $ctx.Pass.Text){$ctx.Form.DialogResult='OK';$ctx.Form.Close()}else{$ctx.Status.Text='Senha incorreta.';$ctx.Pass.Clear();$ctx.Pass.Focus()}
+        if(($ctx.User.Text -ceq 'larquitoS2') -and (Test-LarqPassword $ctx.Pass.Text)){$ctx.Form.DialogResult='OK';$ctx.Form.Close()}else{$ctx.Status.Text='Usuario ou senha incorretos.';$ctx.Pass.Clear();$ctx.Pass.Focus()}
     }) -Primary
-    $btn.Tag=[pscustomobject]@{Form=$f;Pass=$pass;Status=$status}
+    $btn.Tag=[pscustomobject]@{Form=$f;User=$user;Pass=$pass;Status=$status}
     $btn.Location=New-Object Drawing.Point(70,300); $btn.Width=320; $btn.Height=44
     $f.Controls.AddRange(@($title,$sub,$uLab,$user,$pLab,$pass,$status,$btn)); $f.AcceptButton=$btn
     $pass.Focus(); return ($f.ShowDialog() -eq 'OK')
