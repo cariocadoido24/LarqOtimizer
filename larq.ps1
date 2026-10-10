@@ -150,14 +150,36 @@ function Format-Bytes([double]$b){
     if($b -ge 1KB){return ('{0:N1} KB' -f ($b/1KB))}
     return ('{0:N0} B' -f $b)
 }
-function Read-Reg([string]$Path,[string]$Name){try{return (Get-ItemProperty -Path $Path -Name $Name -ErrorAction Stop).$Name}catch{return $null}}
-function Save-RegOriginal([string]$Path,[string]$Name){
-    $k="$Path|$Name"; if(-not $script:OriginalReg.ContainsKey($k)){$script:OriginalReg[$k]=Read-Reg $Path $Name}
+function Read-Reg([string]$Path,[string]$Name){
+    try{return (Get-ItemProperty -LiteralPath $Path -Name $Name -ErrorAction Stop).$Name}
+    catch{return $null}
 }
-function Set-RegDword([string]$Path,[string]$Name,[int]$Value){Save-RegOriginal $Path $Name; if(!(Test-Path $Path)){New-Item $Path -Force|Out-Null}; New-ItemProperty $Path $Name -PropertyType DWord -Value $Value -Force|Out-Null}
-function Set-RegString([string]$Path,[string]$Name,[string]$Value){Save-RegOriginal $Path $Name; if(!(Test-Path $Path)){New-Item $Path -Force|Out-Null}; New-ItemProperty $Path $Name -PropertyType String -Value $Value -Force|Out-Null}
+function Save-RegOriginal([string]$Path,[string]$Name){
+    $key="$Path|$Name"
+    if(-not $script:OriginalReg.ContainsKey($key)){$script:OriginalReg[$key]=Read-Reg $Path $Name}
+}
+function Set-RegVerified([string]$Path,[string]$Name,$Value,[string]$Kind){
+    Save-RegOriginal $Path $Name
+    if(-not (Test-Path -LiteralPath $Path)){New-Item -Path $Path -Force -ErrorAction Stop | Out-Null}
+    New-ItemProperty -Path $Path -Name $Name -PropertyType $Kind -Value $Value -Force -ErrorAction Stop | Out-Null
+    $actual=Get-ItemProperty -LiteralPath $Path -Name $Name -ErrorAction Stop
+    if(([string]$actual.$Name) -cne ([string]$Value)){throw "Registro nao confirmou $Name. Esperado=$Value, lido=$($actual.$Name)"}
+    return $true
+}
+function Set-RegDword([string]$Path,[string]$Name,[int]$Value){return (Set-RegVerified $Path $Name $Value 'DWord')}
+function Set-RegString([string]$Path,[string]$Name,[string]$Value){return (Set-RegVerified $Path $Name $Value 'String')}
 function Restore-Reg([string]$Path,[string]$Name){
-    $k="$Path|$Name"; if($script:OriginalReg.ContainsKey($k)){$v=$script:OriginalReg[$k]; if($null -eq $v){Remove-ItemProperty $Path $Name -EA SilentlyContinue}else{New-ItemProperty $Path $Name -Value $v -Force|Out-Null}}
+    $key="$Path|$Name"
+    if(-not $script:OriginalReg.ContainsKey($key)){throw 'Nao existe backup desta sessao.'}
+    $value=$script:OriginalReg[$key]
+    if($null -eq $value){Remove-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue}
+    else{New-ItemProperty -Path $Path -Name $Name -Value $value -Force -ErrorAction Stop | Out-Null}
+}
+function Report-Error([string]$Context,$ErrorRecord){
+    Show-Warn ("{0} falhou. {1}" -f $Context,$ErrorRecord.Exception.Message)
+}
+function Invoke-Safe([scriptblock]$Action,[string]$Context){
+    try{& $Action}catch{Report-Error $Context $_}
 }
 
 # ---------- Metricas ----------
@@ -242,28 +264,48 @@ $script:Tweaks = @(
     [pscustomobject]@{Id='startupdelay';Name='Atraso de inicializacao';Desc='Remove o atraso artificial aplicado a alguns apps de inicializacao.';Admin=$false;Path='HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize';Value='StartupDelayInMSec';On=0;Off=1}
 )
 function Set-Tweak($tw,[bool]$Enable){
-    if($tw.Admin -and !(Need-Admin)){return}
-    $isString = ($tw.PSObject.Properties.Name -contains 'String') -and [bool]$tw.String
-    if($isString){Set-RegString $tw.Path $tw.Value ([string]$(if($Enable){$tw.On}else{$tw.Off}))}else{Set-RegDword $tw.Path $tw.Value ([int]$(if($Enable){$tw.On}else{$tw.Off}))}
+    if($tw.Admin -and !(Need-Admin)){return $false}
+    try{
+        $isString=($tw.PSObject.Properties.Name -contains 'String') -and [bool]$tw.String
+        $desired=if($Enable){$tw.On}else{$tw.Off}
+        if($isString){[void](Set-RegString $tw.Path $tw.Value ([string]$desired))}
+        else{[void](Set-RegDword $tw.Path $tw.Value ([int]$desired))}
+        $actual=Get-TweakEnabled $tw
+        if($actual -ne $Enable){throw "A leitura nao confirmou $($tw.Name)."}
+        return $true
+    }catch{Report-Error $tw.Name $_;return $false}
 }
 function Get-TweakEnabled($tw){$v=Read-Reg $tw.Path $tw.Value; if($null -eq $v){return $null}; return ([string]$v -eq [string]$tw.On)}
 
 # ---------- CPU / GPU Max ----------
-function Apply-CPU-Max([bool]$Extreme){
-    if(!(Need-Admin)){return}
-    $scheme=(powercfg /getactivescheme) -join ' '
-    $proc='54533251-82be-4824-96c1-47b60b740d00'; $min='893dee8e-2bef-41e0-89c6-b55d0929964c'; $max='bc5038f7-23e0-4960-96da-33abaf5935ec'; $boost='be337238-0d82-4146-a960-4f3749d470c7'; $park='0cc5b647-c1df-4637-891a-dec35c318583'
-    powercfg /setacvalueindex SCHEME_CURRENT $proc $max 100 | Out-Null
-    powercfg /setacvalueindex SCHEME_CURRENT $proc $boost 2 | Out-Null
-    powercfg /setacvalueindex SCHEME_CURRENT $proc $park 100 | Out-Null
-    if($Extreme){powercfg /setacvalueindex SCHEME_CURRENT $proc $min 100|Out-Null}else{powercfg /setacvalueindex SCHEME_CURRENT $proc $min 5|Out-Null}
-    powercfg /setactive SCHEME_CURRENT|Out-Null
-    Set-RegDword 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling' 'PowerThrottlingOff' 1
-    Set-RegDword 'HKCU:\Software\Microsoft\GameBar' 'AutoGameModeEnabled' 1
-    Set-RegDword 'HKCU:\System\GameConfigStore' 'GameDVR_Enabled' 0
-    Show-Info $(if($Extreme){'CPU EXTREMO aplicado. Maior consumo/temperatura.'}else{'CPU JOGO aplicado.'})
+function Set-PowerValue([string]$Sub,[string]$Setting,[int]$Value){
+    $result=(& powercfg.exe /setacvalueindex SCHEME_CURRENT $Sub $Setting $Value 2>&1 | Out-String)
+    if($LASTEXITCODE -ne 0){throw "powercfg nao aceitou $Setting=$Value: $result"}
 }
-function Set-HAGS([bool]$Enable){if(!(Need-Admin)){return}; Set-RegDword 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers' 'HwSchMode' $(if($Enable){2}else{1}); Show-Info 'HAGS alterado. Reinicie o Windows para testar.'}
+function Apply-CPU-Max([bool]$Extreme,[switch]$Quiet){
+    if(!(Need-Admin)){return $false}
+    try{
+        $proc='54533251-82be-4824-96c1-47b60b740d00'
+        $min='893dee8e-2bef-41e0-89c6-b55d0929964c'
+        $max='bc5038f7-23e0-4960-96da-33abaf5935ec'
+        Set-PowerValue $proc $max 100
+        Set-PowerValue $proc $min $(if($Extreme){100}else{5})
+        $result=(& powercfg.exe /setactive SCHEME_CURRENT 2>&1 | Out-String)
+        if($LASTEXITCODE -ne 0){throw "Falha ao ativar plano de energia: $result"}
+        [void](Set-RegDword 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling' 'PowerThrottlingOff' 1)
+        [void](Set-RegDword 'HKCU:\Software\Microsoft\GameBar' 'AutoGameModeEnabled' 1)
+        [void](Set-RegDword 'HKCU:\System\GameConfigStore' 'GameDVR_Enabled' 0)
+        if(-not $Quiet){Show-Info $(if($Extreme){'CPU EXTREMO aplicado. Pode elevar consumo e temperatura.'}else{'CPU JOGO aplicado. Compare FPS e frametime.'})}
+        return $true
+    }catch{Report-Error 'Perfil de CPU' $_;return $false}
+}
+function Set-HAGS([bool]$Enable){
+    if(!(Need-Admin)){return}
+    Invoke-Safe {
+        [void](Set-RegDword 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers' 'HwSchMode' $(if($Enable){2}else{1}))
+        Show-Info 'Preferencia de HAGS salva e confirmada. Reinicie; depende da GPU e driver.'
+    } 'HAGS'
+}
 function Set-AppHighGpu {
     $dlg=New-Object Windows.Forms.OpenFileDialog; $dlg.Filter='Executaveis (*.exe)|*.exe'; if($dlg.ShowDialog() -ne 'OK'){return}
     $path='HKCU:\Software\Microsoft\DirectX\UserGpuPreferences'; if(!(Test-Path $path)){New-Item $path -Force|Out-Null}; New-ItemProperty $path -Name $dlg.FileName -Value 'GpuPreference=2;' -PropertyType String -Force|Out-Null; Show-Info 'Preferencia de GPU de alto desempenho definida para esse executavel.'
