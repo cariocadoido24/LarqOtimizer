@@ -1,0 +1,28 @@
+name: Validar PowerShell
+
+on:
+  push:
+    paths:
+      - 'larq.ps1'
+      - '.github/workflows/validar-powershell.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parse:
+    name: Sintaxe Windows PowerShell 5.1
+    runs-on: windows-latest
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v4
+      - name: Validar AST PowerShell
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'larq.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
+          foreach($err in $errors){ Write-Host ("ERRO: " + $err.Message + " em " + $err.Extent.StartLineNumber) }
+          if($errors.Count -gt 0){ exit 1 }
+          Write-Host 'Sintaxe PowerShell 5.1 valida.'
