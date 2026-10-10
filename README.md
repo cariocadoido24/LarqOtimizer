@@ -1,29 +1,31 @@
-# LarqOtimizer
+# LarqOtimizer — Performance Center
 
-Central nativa de otimização e diagnóstico para Windows.
+Aplicativo Windows com interface **WinForms nativa**, executado em memória pelo PowerShell.
 
-O repositório é **privado**. A primeira instalação é iniciada inteiramente pelo PowerShell. Se o PC ainda não tiver o GitHub CLI, o comando instala o `gh`; se ainda não houver login, o próprio fluxo inicia a autorização do GitHub. Depois disso, o pacote privado é baixado e instalado.
+## Abrir (sem instalação, sem login do GitHub)
 
-## PC novo — cole no PowerShell
-
-```powershell
-$g=(Get-Command gh -EA SilentlyContinue).Source;if(!$g){winget install --id GitHub.cli -e --source winget --accept-package-agreements --accept-source-agreements;$g="$env:ProgramFiles\GitHub CLI\gh.exe";if(!(Test-Path $g)){$g="$env:LOCALAPPDATA\Programs\GitHub CLI\gh.exe"}};& $g auth status -h github.com *> $null;if($LASTEXITCODE -ne 0){& $g auth login -h github.com -p https --web};$c=& $g api -H "Accept: application/vnd.github.raw+json" repos/cariocadoido24/LarqOtimizer/contents/larq.ps1;& ([scriptblock]::Create(($c -join "`n")))
-```
-
-A autorização segura do GitHub pode abrir a página oficial de login/autorização uma vez. Ela é iniciada pelo PowerShell; não é necessário navegar manualmente até o repositório.
-
-## Depois de instalado
-
-Abrir:
+Abra o Windows PowerShell **como administrador** se quiser aplicar ajustes do sistema:
 
 ```powershell
-larq
+irm "https://raw.githubusercontent.com/cariocadoido24/LarqOtimizer/main/larq.ps1" | iex
 ```
 
-Atualizar:
+O script é transferido pela internet para a memória em toda abertura, mas não instala um executável nem mantém pasta do aplicativo. Alguns ajustes escolhidos no aplicativo modificam o Windows e **persistem após fechar**.
 
-```powershell
-larq update
-```
+## Destaques
 
-A configuração de autenticação do LarqOtimizer fica em `%LOCALAPPDATA%\LarqOtimizer\Auth` e não é apagada nas atualizações. A credencial do aplicativo não é armazenada em texto puro no GitHub.
+- Dashboard moderno com CPU, RAM, disco, GPU 3D, rede, sensor ACPI (quando disponível), gráfico e processos
+- Abas carregadas sob demanda, para iniciar mais rápido
+- Monitoramento menos frequente para evitar excesso de consultas WMI
+- Perfil de Windows para jogos, configuração de Fortnite com backup e restauração
+- Ajustes do registro com checagem de leitura após gravação
+- Gerenciamento de energia e ajustes básicos de rede com relatório de erro
+- Hardware, BIOS detectável, dispositivos USB, drivers, disco e limpeza
+
+Nem todos os sensores estão disponíveis no Windows. O aplicativo mostra N/D quando não pode obter leitura confiável. Não há garantia de ganho de FPS ou redução de ping: isso depende do hardware, do jogo e da rede.
+
+## Testes
+
+A validação do código para Windows PowerShell 5.1 roda em [GitHub Actions](https://github.com/cariocadoido24/LarqOtimizer/actions). Ela verifica sintaxe, a função de senha com **senha fictícia de teste**, edição de INI e gravação em chave temporária do registro do runner. O teste **não substitui** a execução e inspeção visual no seu Windows.
+
+A senha e o nome de usuário são definidos no próprio script. Por estar em repositório público, o login do aplicativo **não deve ser considerado uma proteção forte contra engenharia reversa**.
