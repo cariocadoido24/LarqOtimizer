@@ -16,6 +16,14 @@ $script:OriginalReg = @{}
 $script:PrevProcCpu = @{}
 $script:LastProcSample = Get-Date
 $script:MainTimer = $null
+$script:TickCount = 0
+$script:CurrentPage = 'dash'
+$script:PageBuilds = @{}
+$script:PageBuilt = @{}
+$script:MetricBars = @{}
+$script:SparkPoints = New-Object 'System.Collections.Generic.List[double]'
+$script:LastKnownGpu = $null
+$script:LastKnownTemp = $null
 
 # ---------- Tema ----------
 $C = [ordered]@{
@@ -153,7 +161,7 @@ function Restore-Reg([string]$Path,[string]$Name){
 }
 
 # ---------- Metricas ----------
-function Get-Metrics {
+function Get-Metrics([bool]$SlowSensors=$false) {
     $o=[ordered]@{CPU=0;RAM=0;RAMUsed=0;RAMTotal=0;Disk=0;Read=0;Write=0;NetDown=0;NetUp=0;GPU=$null;Temp=$null}
     try{$cpu=Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'"; $o.CPU=[math]::Max(0,[math]::Min(100,[double]$cpu.PercentProcessorTime))}catch{}
     try{
@@ -169,7 +177,7 @@ function Get-Metrics {
         $ns=Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface
         foreach($n in $ns){$o.NetDown += [double]$n.BytesReceivedPersec;$o.NetUp += [double]$n.BytesSentPersec}
     }catch{}
-    try{
+    if($SlowSensors){try{
         $g=Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine -EA Stop | Where-Object {$_.Name -match 'engtype_3D'}
         if($g){$sum=($g|Measure-Object UtilizationPercentage -Sum).Sum; $o.GPU=[math]::Min(100,[math]::Max(0,[double]$sum))}
     }catch{}
@@ -177,6 +185,12 @@ function Get-Metrics {
         $t=Get-CimInstance -Namespace root/wmi -Class MSAcpi_ThermalZoneTemperature -EA Stop | Select-Object -First 1
         if($t){$c=[math]::Round(($t.CurrentTemperature/10)-273.15,1);if($c -gt 0 -and $c -lt 130){$o.Temp=$c}}
     }catch{}
+        $script:LastKnownGpu=$o.GPU
+        $script:LastKnownTemp=$o.Temp
+    }else{
+        $o.GPU=$script:LastKnownGpu
+        $o.Temp=$script:LastKnownTemp
+    }
     return [pscustomobject]$o
 }
 function Get-TopProcesses {
@@ -454,12 +468,43 @@ $content=New-Object Windows.Forms.Panel;$content.Dock='Fill';$content.BackColor=
 $host.Controls.Add($content);$host.Controls.Add($header)
 $form.Controls.Add($host);$form.Controls.Add($side)
 
-$pages=@{};$navButtons=@{}
+$script:pages=@{};$script:navButtons=@{}
 function Add-Page([string]$Id,[string]$Title,[scriptblock]$Build){
-    $p=New-Page;&$Build $p;$p.Visible=$false;$content.Controls.Add($p);$pages[$Id]=$p
-    $b=New-Button $Title ({param($s,$e); $ctx=$s.Tag; foreach($k in $pages.Keys){$pages[$k].Visible=$false;$navButtons[$k].BackColor=$C.Surface2;$navButtons[$k].ForeColor=$C.Text};$pages[$ctx.Id].Visible=$true;$pages[$ctx.Id].BringToFront();$s.BackColor=$C.Cyan;$s.ForeColor=$C.Bg;$headerTitle.Text=$ctx.Title})
+    $p=New-Page
+    $p.Visible=$false
+    $content.Controls.Add($p)
+    $script:pages[$Id]=$p
+    $script:PageBuilds[$Id]=$Build
+    $script:PageBuilt[$Id]=$false
+    if($Id -eq 'dash'){
+        & $Build $p
+        $script:PageBuilt[$Id]=$true
+    }
+    $b=New-Button $Title ({
+        param($sender,$e)
+        $ctx=$sender.Tag
+        foreach($key in @($script:pages.Keys)){
+            $script:pages[$key].Visible=$false
+            $script:navButtons[$key].BackColor=$C.Surface2
+            $script:navButtons[$key].ForeColor=$C.Text
+        }
+        $script:CurrentPage=$ctx.Id
+        $script:pages[$ctx.Id].Visible=$true
+        $script:pages[$ctx.Id].BringToFront()
+        $sender.BackColor=$C.Cyan
+        $sender.ForeColor=$C.Bg
+        $headerTitle.Text=$ctx.Title
+        if(-not $script:PageBuilt[$ctx.Id]){
+            $script:PageBuilt[$ctx.Id]=$true
+            try{ & $script:PageBuilds[$ctx.Id] $script:pages[$ctx.Id] }
+            catch{$script:PageBuilt[$ctx.Id]=$false; Show-Warn ('Falha ao abrir '+$ctx.Title+': '+$_.Exception.Message)}
+        }
+    })
     $b.Tag=[pscustomobject]@{Id=$Id;Title=$Title}
-    $b.Width=205;$b.Height=40;$b.Margin=New-Object Windows.Forms.Padding(2,2,2,2);$nav.Controls.Add($b);$navButtons[$Id]=$b
+    $b.Width=205;$b.Height=41
+    $b.Margin=New-Object Windows.Forms.Padding(2,3,2,3)
+    $nav.Controls.Add($b)
+    $script:navButtons[$Id]=$b
 }
 
 # Dashboard labels globais
@@ -601,13 +646,31 @@ Add-Page 'oosu' 'O&O  Recomendado' {
 # Primeira pagina
 $pages['dash'].Visible=$true;$pages['dash'].BringToFront();$navButtons['dash'].BackColor=$C.Cyan;$navButtons['dash'].ForeColor=$C.Bg
 
-# Timer realtime
-$script:MainTimer=New-Object Windows.Forms.Timer;$script:MainTimer.Interval=750;$tick=0
+# Monitor inicia apos exibir a janela, sem travar a abertura
+$script:MainTimer=New-Object Windows.Forms.Timer
+$script:MainTimer.Interval=2700
 $script:MainTimer.Add_Tick({
-    $tick++
-    $m=Get-Metrics
-    if($cpuV){$cpuV.Text=('{0:N0}%' -f $m.CPU)};if($ramV){$ramV.Text=('{0:N0}%' -f $m.RAM)};if($diskV){$diskV.Text=('{0:N0}%' -f $m.Disk)};if($gpuV){$gpuV.Text=$(if($null -eq $m.GPU){'N/D'}else{('{0:N0}%' -f $m.GPU)})};if($netV){$netV.Text=((Format-Bytes $m.NetDown)+'/s')};if($tempV){$tempV.Text=$(if($null -eq $m.Temp){'N/D'}else{"$($m.Temp) °C"})}
-    if($procGrid -and ($tick % 2 -eq 0)){$procGrid.Rows.Clear();foreach($r in Get-TopProcesses){[void]$procGrid.Rows.Add($r.Name,$r.PercentProcessorTime,(Format-Bytes $r.WorkingSetPrivate),(Format-Bytes $r.IOReadBytesPersec),(Format-Bytes $r.IOWriteBytesPersec))}}
+    if($script:CurrentPage -ne 'dash'){return}
+    $script:TickCount++
+    try {
+        $m=Get-Metrics ($script:TickCount % 5 -eq 1)
+        if($script:cpuV){$script:cpuV.Text=('{0:N0}%' -f $m.CPU);Update-DashBar 'cpuV' $m.CPU}
+        if($script:ramV){$script:ramV.Text=('{0:N0}%' -f $m.RAM);Update-DashBar 'ramV' $m.RAM}
+        if($script:diskV){$script:diskV.Text=('{0:N0}%' -f $m.Disk);Update-DashBar 'diskV' $m.Disk}
+        if($script:gpuV){$script:gpuV.Text=$(if($null -eq $m.GPU){'N/D'}else{('{0:N0}%' -f $m.GPU)});if($null -ne $m.GPU){Update-DashBar 'gpuV' $m.GPU}}
+        if($script:netV){$script:netV.Text=((Format-Bytes $m.NetDown)+'/s')}
+        if($script:tempV){$script:tempV.Text=$(if($null -eq $m.Temp){'N/D'}else{"$($m.Temp) °C"})}
+        $script:SparkPoints.Add([double]$m.CPU)
+        if($script:SparkPoints.Count -gt 46){$script:SparkPoints.RemoveAt(0)}
+        if($script:DashGraph){$script:DashGraph.Invalidate()}
+        if($script:procGrid -and ($script:TickCount % 4 -eq 0)){
+            $script:procGrid.Rows.Clear()
+            foreach($r in Get-TopProcesses){
+                [void]$script:procGrid.Rows.Add($r.Name,$r.PercentProcessorTime,(Format-Bytes $r.WorkingSetPrivate),(Format-Bytes $r.IOReadBytesPersec),(Format-Bytes $r.IOWriteBytesPersec))
+            }
+        }
+    } catch {}
 })
-$script:MainTimer.Start();$form.Add_FormClosed({$script:MainTimer.Stop();$script:MainTimer.Dispose()})
+$form.Add_Shown({$script:MainTimer.Start()})
+$form.Add_FormClosed({$script:MainTimer.Stop();$script:MainTimer.Dispose()})
 [void]$form.ShowDialog()
