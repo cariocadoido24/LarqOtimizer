@@ -27,15 +27,15 @@ $script:LastKnownTemp = $null
 
 # ---------- Tema ----------
 $C = [ordered]@{
-    Bg       = [Drawing.Color]::FromArgb(11,15,25)
-    Surface  = [Drawing.Color]::FromArgb(17,24,39)
-    Surface2 = [Drawing.Color]::FromArgb(24,33,49)
-    Border   = [Drawing.Color]::FromArgb(48,58,76)
+    Bg       = [Drawing.Color]::FromArgb(9,13,24)
+    Surface  = [Drawing.Color]::FromArgb(15,23,40)
+    Surface2 = [Drawing.Color]::FromArgb(23,34,53)
+    Border   = [Drawing.Color]::FromArgb(41,61,84)
     Text     = [Drawing.Color]::FromArgb(243,244,246)
     Muted    = [Drawing.Color]::FromArgb(156,163,175)
-    Cyan     = [Drawing.Color]::FromArgb(0,240,255)
-    Purple   = [Drawing.Color]::FromArgb(112,0,255)
-    Green    = [Drawing.Color]::FromArgb(0,255,102)
+    Cyan     = [Drawing.Color]::FromArgb(34,211,238)
+    Purple   = [Drawing.Color]::FromArgb(139,92,246)
+    Green    = [Drawing.Color]::FromArgb(52,211,153)
     Red      = [Drawing.Color]::FromArgb(255,0,85)
     Yellow   = [Drawing.Color]::FromArgb(255,184,0)
 }
@@ -452,17 +452,18 @@ function Bios-Text {
 if(-not (Show-Login)){return}
 
 $form=New-Object Windows.Forms.Form
-$form.Text='LarqOtimizer · PowerShell Edition'; $form.StartPosition='CenterScreen'; $form.Size=New-Object Drawing.Size(1460,900); $form.MinimumSize=New-Object Drawing.Size(1100,700); $form.BackColor=$C.Bg; $form.ForeColor=$C.Text
+$form.Text='LarqOtimizer  |  Performance Center'; $form.StartPosition='CenterScreen'; $form.Size=New-Object Drawing.Size(1500,940); $form.MinimumSize=New-Object Drawing.Size(1180,720); $form.BackColor=$C.Bg; $form.ForeColor=$C.Text
+$form.Font=New-Object Drawing.Font('Segoe UI',9)
 
-$side=New-Object Windows.Forms.Panel; $side.Dock='Left';$side.Width=245;$side.BackColor=$C.Surface;$side.Padding=New-Object Windows.Forms.Padding(12)
-$logo=New-Label '⚡  LARQOTIMIZER  PRO' 13 $C.Cyan -Bold; $logo.Dock='Top';$logo.Height=70;$logo.AutoSize=$false;$logo.TextAlign='MiddleLeft';$side.Controls.Add($logo)
+$side=New-Object Windows.Forms.Panel; $side.Dock='Left';$side.Width=236;$side.BackColor=$C.Surface;$side.Padding=New-Object Windows.Forms.Padding(12)
+$logo=New-Label '◈  LARQOTIMIZER' 15 $C.Cyan -Bold; $logo.Dock='Top';$logo.Height=88;$logo.AutoSize=$false;$logo.TextAlign='MiddleLeft';$side.Controls.Add($logo)
 $nav=New-Object Windows.Forms.FlowLayoutPanel;$nav.Dock='Fill';$nav.FlowDirection='TopDown';$nav.WrapContents=$false;$nav.AutoScroll=$true;$nav.BackColor=$C.Surface;$side.Controls.Add($nav);$nav.BringToFront()
 $admin=New-Label ($(if(Is-Admin){'● Administrador'}else{'○ Usuario normal'})) 8 $(if(Is-Admin){$C.Green}else{$C.Yellow});$admin.Dock='Bottom';$admin.Height=32;$admin.AutoSize=$false;$side.Controls.Add($admin)
 
 $host=New-Object Windows.Forms.Panel;$host.Dock='Fill';$host.BackColor=$C.Bg
-$header=New-Object Windows.Forms.Panel;$header.Dock='Top';$header.Height=68;$header.BackColor=$C.Surface;$header.Padding=New-Object Windows.Forms.Padding(20,10,20,8)
-$headerTitle=New-Label 'Visao Geral' 14 $C.Text -Bold;$headerTitle.Dock='Left';$headerTitle.Width=430;$headerTitle.AutoSize=$false;$headerTitle.TextAlign='MiddleLeft'
-$quick=New-Button '⚡ MODO MAXIMO CPU + GPU' ({if(Confirm 'Aplicar perfil maximo de CPU + ajustes de jogos? Pode aumentar temperatura/consumo.'){Apply-CPU-Max $true}}) -Primary;$quick.Dock='Right';$quick.Width=235
+$header=New-Object Windows.Forms.Panel;$header.Dock='Top';$header.Height=76;$header.BackColor=$C.Surface;$header.Padding=New-Object Windows.Forms.Padding(20,10,20,8)
+$headerTitle=New-Label 'Visão geral' 17 $C.Text -Bold;$headerTitle.Dock='Left';$headerTitle.Width=430;$headerTitle.AutoSize=$false;$headerTitle.TextAlign='MiddleLeft'
+$quick=New-Button '⚡ MODO CPU EXTREMO' ({if(Confirm 'Aplicar perfil CPU extremo? Pode elevar a temperatura e o consumo.'){[void](Apply-CPU-Max $true)}}) -Primary;$quick.Dock='Right';$quick.Width=235
 $header.Controls.AddRange(@($quick,$headerTitle))
 $content=New-Object Windows.Forms.Panel;$content.Dock='Fill';$content.BackColor=$C.Bg
 $host.Controls.Add($content);$host.Controls.Add($header)
@@ -509,18 +510,127 @@ function Add-Page([string]$Id,[string]$Title,[scriptblock]$Build){
 
 # Dashboard labels globais
 $cpuV=$null;$ramV=$null;$diskV=$null;$gpuV=$null;$netV=$null;$tempV=$null;$procGrid=$null
+
+function New-Sparkline([Drawing.Color]$LineColor){
+    $p=New-Object Windows.Forms.Panel
+    $p.Width=690; $p.Height=100; $p.BackColor=$C.Surface
+    $p.Tag=[pscustomobject]@{Points=$script:SparkPoints;LineColor=$LineColor}
+    $p.Add_Paint({
+        param($sender,$e)
+        $points=$sender.Tag.Points
+        if($points.Count -lt 2){return}
+        $g=$e.Graphics
+        $g.SmoothingMode=[Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $poly=New-Object 'System.Collections.Generic.List[System.Drawing.PointF]'
+        for($i=0;$i -lt $points.Count;$i++){
+            $x=8+[float]$i*([math]::Max(1,$sender.ClientSize.Width-16))/([math]::Max(1,$points.Count-1))
+            $y=[float]($sender.ClientSize.Height-12-([math]::Min(100,[math]::Max(0,$points[$i]))/100)*($sender.ClientSize.Height-24))
+            $poly.Add((New-Object Drawing.PointF($x,$y)))
+        }
+        $pen=New-Object Drawing.Pen($sender.Tag.LineColor,2.2)
+        try{$g.DrawLines($pen,$poly.ToArray())}finally{$pen.Dispose()}
+    })
+    return $p
+}
+function New-DashMetric([string]$Caption,[string]$Variable,[Drawing.Color]$Accent){
+    $card=New-Object Windows.Forms.Panel
+    $card.Width=164; $card.Height=128; $card.BackColor=$C.Surface
+    $card.Margin=New-Object Windows.Forms.Padding(0,0,9,9)
+    $card.BorderStyle='FixedSingle'
+    $name=New-Label $Caption 9 $C.Muted -Bold
+    $name.Location=New-Object Drawing.Point(13,12)
+    $lab=New-Label '...' 22 $Accent -Bold
+    $lab.Location=New-Object Drawing.Point(13,39)
+    $lab.AutoSize=$false; $lab.Size=New-Object Drawing.Size(139,44)
+    $track=New-Object Windows.Forms.Panel
+    $track.Location=New-Object Drawing.Point(13,103)
+    $track.Size=New-Object Drawing.Size(135,5); $track.BackColor=$C.Border
+    $fill=New-Object Windows.Forms.Panel
+    $fill.BackColor=$Accent; $fill.Location=New-Object Drawing.Point(0,0)
+    $fill.Size=New-Object Drawing.Size(0,5)
+    $track.Controls.Add($fill)
+    $card.Controls.AddRange(@($name,$lab,$track))
+    Set-Variable -Scope Script -Name $Variable -Value $lab
+    $script:MetricBars[$Variable]=[pscustomobject]@{Fill=$fill;Track=$track}
+    return $card
+}
+function Update-DashBar([string]$Key,[double]$Percent){
+    $bar=$script:MetricBars[$Key]
+    if($null -ne $bar){$bar.Fill.Width=[int][math]::Round($bar.Track.Width*[math]::Min(100,[math]::Max(0,$Percent))/100)}
+}
 Add-Page 'dash' '▦  Visao Geral' {
     param($p)
-    $flow=New-Flow;$p.Controls.Add($flow)
-    $hero=New-Card 'Seu PC em tempo real' 'Atualizacao rapida de CPU, RAM, GPU, disco e rede.';$hero.Height=100;$hero.Width=1100
-    $heroBtn=New-Button 'OTIMIZAR COM 1-CLIQUE' ({if(Confirm 'Aplicar ajustes recomendados de desempenho para Windows e jogos?'){Apply-WindowsGamingProfile}}) -Primary;$heroBtn.Location=New-Object Drawing.Point(820,25);$heroBtn.Width=245;$hero.Controls.Add($heroBtn);Add-FlowControl $flow $hero 1100
-    $metrics=New-Object Windows.Forms.FlowLayoutPanel;$metrics.AutoSize=$true;$metrics.WrapContents=$true;$metrics.BackColor=$C.Bg
-    foreach($m in @(@('CPU','cpuV',$C.Cyan),@('RAM','ramV',$C.Purple),@('DISCO','diskV',$C.Green),@('GPU 3D','gpuV',$C.Cyan),@('REDE','netV',$C.Purple),@('TEMPERATURA','tempV',$C.Yellow))){
-        $card=New-Card $m[0];$card.Width=175;$card.Height=100;$lab=New-Label '—' 18 $m[2] -Bold;$lab.Location=New-Object Drawing.Point(14,48);$card.Controls.Add($lab);Set-Variable -Scope Script -Name $m[1] -Value $lab;$metrics.Controls.Add($card)
-    }
-    Add-FlowControl $flow $metrics 1120
-    Add-FlowControl $flow (New-Label 'Processos em tempo real' 14 $C.Text -Bold) 1100
-    $procGrid=New-Object Windows.Forms.DataGridView;$procGrid.Width=1100;$procGrid.Height=380;$procGrid.BackgroundColor=$C.Surface;$procGrid.ForeColor=$C.Text;$procGrid.GridColor=$C.Border;$procGrid.RowHeadersVisible=$false;$procGrid.AllowUserToAddRows=$false;$procGrid.ReadOnly=$true;$procGrid.SelectionMode='FullRowSelect';$procGrid.AutoSizeColumnsMode='Fill';$procGrid.EnableHeadersVisualStyles=$false;$procGrid.ColumnHeadersDefaultCellStyle.BackColor=$C.Surface2;$procGrid.ColumnHeadersDefaultCellStyle.ForeColor=$C.Muted;$procGrid.DefaultCellStyle.BackColor=$C.Surface;$procGrid.DefaultCellStyle.ForeColor=$C.Text;$procGrid.DefaultCellStyle.SelectionBackColor=[Drawing.Color]::FromArgb(16,45,58);[void]$procGrid.Columns.Add('Name','Processo');[void]$procGrid.Columns.Add('CPU','CPU %');[void]$procGrid.Columns.Add('RAM','RAM');[void]$procGrid.Columns.Add('Read','Leitura/s');[void]$procGrid.Columns.Add('Write','Gravacao/s');Add-FlowControl $flow $procGrid 1100
+    $flow=New-Flow; $p.Controls.Add($flow)
+    $hero=New-Object Windows.Forms.Panel
+    $hero.Width=1060;$hero.Height=156
+    $hero.Margin=New-Object Windows.Forms.Padding(0,0,0,16)
+    $hero.Tag=[pscustomobject]@{Left=[Drawing.Color]::FromArgb(18,56,80);Right=[Drawing.Color]::FromArgb(42,25,72)}
+    $hero.Add_Paint({
+        param($sender,$e)
+        $rect=$sender.ClientRectangle
+        if($rect.Width -le 0 -or $rect.Height -le 0){return}
+        $brush=New-Object Drawing.Drawing2D.LinearGradientBrush($rect,$sender.Tag.Left,$sender.Tag.Right,([single]0))
+        try{$e.Graphics.FillRectangle($brush,$rect)}finally{$brush.Dispose()}
+    })
+    $tag=New-Label 'LARQ  /  PERFORMANCE CENTER' 9 $C.Cyan -Bold
+    $tag.Location=New-Object Drawing.Point(24,17)
+    $welcome=New-Label 'Seu PC. Seu melhor desempenho.' 21 $C.Text -Bold
+    $welcome.Location=New-Object Drawing.Point(24,47)
+    $desc=New-Label 'Monitoramento real  •  ajustes verificáveis  •  controle total' 10 $C.Muted
+    $desc.Location=New-Object Drawing.Point(25,103)
+    $opt=New-Button 'OTIMIZAR WINDOWS' ({if(Confirm 'Aplicar ajustes de desempenho em Windows e jogos?'){Apply-WindowsGamingProfile}}) -Primary
+    $opt.Location=New-Object Drawing.Point(812,45);$opt.Size=New-Object Drawing.Size(225,48)
+    $hero.Controls.AddRange(@($tag,$welcome,$desc,$opt))
+    Add-FlowControl $flow $hero 1060
+    Add-FlowControl $flow (New-Label 'VISÃO GERAL DO SISTEMA' 11 $C.Text -Bold) 1050
+    $metrics=New-Object Windows.Forms.FlowLayoutPanel
+    $metrics.Width=1070;$metrics.Height=142;$metrics.WrapContents=$false
+    $metrics.FlowDirection='LeftToRight';$metrics.BackColor=$C.Bg
+    foreach($item in @(
+       @('PROCESSADOR','cpuV',$C.Cyan), @('MEMÓRIA','ramV',$C.Purple),
+       @('DISCO','diskV',$C.Green), @('GPU 3D','gpuV',$C.Cyan),
+       @('REDE ↓','netV',$C.Purple), @('SENSOR ACPI','tempV',$C.Yellow)
+    )){[void]$metrics.Controls.Add((New-DashMetric $item[0] $item[1] $item[2]))}
+    Add-FlowControl $flow $metrics 1060
+    $panels=New-Object Windows.Forms.FlowLayoutPanel
+    $panels.Width=1060;$panels.Height=185;$panels.WrapContents=$false;$panels.BackColor=$C.Bg
+    $graphCard=New-Card 'Uso do processador' 'Histórico da CPU. Medição real, não simulada.'
+    $graphCard.Width=716;$graphCard.Height=175
+    $script:DashGraph=New-Sparkline $C.Cyan
+    $script:DashGraph.Location=New-Object Drawing.Point(10,62)
+    $graphCard.Controls.Add($script:DashGraph)
+    $panels.Controls.Add($graphCard)
+    $actionCard=New-Card 'AÇÕES RÁPIDAS' 'Ajustes sob seu controle'
+    $actionCard.Width=328;$actionCard.Height=175
+    $boost=New-Button 'CPU JOGO' ({[void](Apply-CPU-Max $false)}) -Primary
+    $boost.Location=New-Object Drawing.Point(14,55);$boost.Width=137
+    $clean=New-Button 'LIMPEZA' ({$script:navButtons['clean'].PerformClick()})
+    $clean.Location=New-Object Drawing.Point(163,55);$clean.Width=139
+    $game=New-Button 'FORTNITE / FPS' ({$script:navButtons['gaming'].PerformClick()})
+    $game.Location=New-Object Drawing.Point(14,106);$game.Width=287
+    $actionCard.Controls.AddRange(@($boost,$clean,$game))
+    $panels.Controls.Add($actionCard)
+    Add-FlowControl $flow $panels 1060
+    Add-FlowControl $flow (New-Label 'PROCESSOS  /  MAIOR USO DE CPU' 11 $C.Text -Bold) 1060
+    $script:procGrid=New-Object Windows.Forms.DataGridView
+    $procGrid=$script:procGrid
+    $procGrid.Width=1060;$procGrid.Height=286
+    $procGrid.BackgroundColor=$C.Surface;$procGrid.ForeColor=$C.Text
+    $procGrid.GridColor=$C.Border;$procGrid.RowHeadersVisible=$false
+    $procGrid.AllowUserToAddRows=$false;$procGrid.ReadOnly=$true
+    $procGrid.SelectionMode='FullRowSelect';$procGrid.AutoSizeColumnsMode='Fill'
+    $procGrid.EnableHeadersVisualStyles=$false;$procGrid.ColumnHeadersHeight=30
+    $procGrid.ColumnHeadersDefaultCellStyle.BackColor=$C.Surface2
+    $procGrid.ColumnHeadersDefaultCellStyle.ForeColor=$C.Muted
+    $procGrid.DefaultCellStyle.BackColor=$C.Surface
+    $procGrid.DefaultCellStyle.ForeColor=$C.Text
+    $procGrid.DefaultCellStyle.SelectionBackColor=[Drawing.Color]::FromArgb(20,75,85)
+    [void]$procGrid.Columns.Add('Name','PROCESSO')
+    [void]$procGrid.Columns.Add('CPU','CPU %')
+    [void]$procGrid.Columns.Add('RAM','MEMÓRIA')
+    [void]$procGrid.Columns.Add('Read','LEITURA/s')
+    [void]$procGrid.Columns.Add('Write','GRAVAÇÃO/s')
+    Add-FlowControl $flow $procGrid 1060
 }
 
 Add-Page 'hardware' 'CPU  Hardware' {
