@@ -343,10 +343,23 @@ function Find-FortniteExe {
     return $null
 }
 function Set-IniValue([string]$Content,[string]$Key,[string]$Value){
-    $pattern='(?m)^\s*'+[regex]::Escape($Key)+'\s*=.*$'
-    $line="$Key=$Value"
-    if([regex]::IsMatch($Content,$pattern)){return [regex]::Replace($Content,$pattern,$line)}
-    return ($Content.TrimEnd()+[Environment]::NewLine+$line+[Environment]::NewLine)
+    # Fortnite usa secoes INI diferentes para preferencias de video e ScalabilityGroups.
+    $section=if($Key.StartsWith('sg.')){'ScalabilityGroups'}else{'/Script/FortniteGame.FortGameUserSettings'}
+    $nl=[Environment]::NewLine
+    $keyPattern='(?m)^[ \t]*'+[regex]::Escape($Key)+'[ \t]*=[^\r\n]*'
+    $sectionPattern='(?ms)^\['+[regex]::Escape($section)+'\][^\r\n]*\r?\n.*?(?=^\[|\z)'
+    $match=[regex]::Match($Content,$sectionPattern)
+    $line=$Key+'='+$Value
+    if($match.Success){
+        $block=$match.Value
+        if([regex]::IsMatch($block,$keyPattern)){
+            $changed=[regex]::Replace($block,$keyPattern,[string]$line,1)
+        }else{
+            $changed=$block.TrimEnd()+$nl+$line+$nl+$nl
+        }
+        return ($Content.Substring(0,$match.Index)+$changed+$Content.Substring($match.Index+$match.Length))
+    }
+    return ($Content.TrimEnd()+$nl+$nl+'['+$section+']'+$nl+$line+$nl)
 }
 function Backup-FortniteConfig {
     $cfg=Get-FortniteConfigPath
@@ -368,11 +381,11 @@ function Restore-FortniteConfig {
 }
 function Set-FortniteHighGpu {
     $exe=Find-FortniteExe
-    if(!$exe){Show-Warn 'Fortnite nao foi localizado automaticamente. Use GPU alto desempenho por jogo e selecione o executavel manualmente.';return $false}
-    $path='HKCU:\Software\Microsoft\DirectX\UserGpuPreferences'
-    if(!(Test-Path $path)){New-Item $path -Force|Out-Null}
-    New-ItemProperty $path -Name $exe -Value 'GpuPreference=2;' -PropertyType String -Force|Out-Null
-    return $true
+    if(!$exe){Show-Warn 'Executavel do Fortnite nao localizado. Voce pode escolher o executavel em GPU alto desempenho por jogo.';return $false}
+    try {
+        [void](Set-RegString 'HKCU:\Software\Microsoft\DirectX\UserGpuPreferences' $exe 'GpuPreference=2;')
+        return $true
+    }catch{Report-Error 'Preferencia de GPU do Fortnite' $_;return $false}
 }
 function Apply-FortnitePerformance([int]$Width,[int]$Height){
     if(Get-Process FortniteClient-Win64-Shipping -EA SilentlyContinue){Show-Warn 'Feche o Fortnite antes de aplicar as configuracoes.';return}
