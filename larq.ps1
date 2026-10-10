@@ -409,39 +409,57 @@ function Apply-FortnitePerformance([int]$Width,[int]$Height){
             'sg.ShadingQuality'='0'
         }
         foreach($k in $pairs.Keys){$c=Set-IniValue $c $k $pairs[$k]}
-        Set-Content -LiteralPath $cfg -Value $c -Encoding UTF8 -Force
-        [void](Set-FortniteHighGpu)
+        [IO.File]::WriteAllText($cfg,$c,(New-Object Text.UTF8Encoding($false)))
+        $verified=[IO.File]::ReadAllText($cfg)
+        if(($verified -notmatch ('(?m)^ResolutionSizeX='+$Width+'$')) -or ($verified -notmatch ('(?m)^ResolutionSizeY='+$Height+'$'))){
+            throw 'GameUserSettings.ini nao confirmou a nova resolucao.'
+        }
+        try{[void](Set-FortniteHighGpu)}catch{}
         Show-Info ("Fortnite otimizado para FPS. Resolucao: "+$Width+"x"+$Height+". Use o modo Performance dentro do jogo para comparar. Backup criado antes da alteracao.")
     }catch{Show-Warn "Falha ao alterar Fortnite: $($_.Exception.Message)"}
 }
 function Apply-InputLowLatency {
-    Set-RegString 'HKCU:\Control Panel\Mouse' 'MouseSpeed' '0'
-    Set-RegString 'HKCU:\Control Panel\Mouse' 'MouseThreshold1' '0'
-    Set-RegString 'HKCU:\Control Panel\Mouse' 'MouseThreshold2' '0'
-    Show-Info 'Aceleracao do ponteiro desativada. Para resposta consistente, deixe a velocidade do ponteiro do Windows em 6/11.'
+    Invoke-Safe {
+        foreach($name in @('MouseSpeed','MouseThreshold1','MouseThreshold2')){
+            [void](Set-RegString 'HKCU:\Control Panel\Mouse' $name '0')
+        }
+        Show-Info 'Aceleracao do ponteiro desligada. Pode precisar reiniciar a sessao.'
+    } 'Mouse'
 }
 function Apply-NetworkGaming {
     if(!(Need-Admin)){return}
-    try{netsh int tcp set global rss=enabled | Out-Null}catch{}
-    try{netsh int tcp set global autotuninglevel=normal | Out-Null}catch{}
-    $tw=$script:Tweaks|Where-Object{$_.Id -eq 'delivery'}|Select-Object -First 1
-    if($tw){Set-Tweak $tw $true}
-    Show-Info 'Perfil de rede seguro aplicado: RSS ligado, TCP Auto-Tuning normal e Delivery Optimization P2P desligado. Isso pode reduzir trafego de fundo, mas nao garante ping menor.'
+    Invoke-Safe {
+        $output=(& netsh.exe int tcp set global rss=enabled 2>&1 | Out-String)
+        if($LASTEXITCODE -ne 0){throw "RSS nao foi aplicado: $output"}
+        $output=(& netsh.exe int tcp set global autotuninglevel=normal 2>&1 | Out-String)
+        if($LASTEXITCODE -ne 0){throw "TCP Auto-Tuning nao foi aplicado: $output"}
+        $tw=$script:Tweaks|Where-Object{$_.Id -eq 'delivery'}|Select-Object -First 1
+        if($tw -and -not (Set-Tweak $tw $true)){throw 'Delivery Optimization nao foi aplicada.'}
+        Show-Info 'Ajustes TCP aceitos pelo Windows. Nao garantem ping menor; depende da rota e servidor.'
+    } 'Rede'
 }
 function Apply-WindowsGamingProfile {
     if(!(Need-Admin)){return}
-    Apply-CPU-Max $false
+    $ok=0
+    $failed=New-Object 'System.Collections.Generic.List[string]'
+    if(Apply-CPU-Max $false -Quiet){$ok++}else{$failed.Add('CPU JOGO')}
     foreach($id in @('gamemode','gamedvr','powerthrottle','widgets','notifications','delivery')){
         $tw=$script:Tweaks|Where-Object{$_.Id -eq $id}|Select-Object -First 1
-        if($tw){Set-Tweak $tw $true}
+        if($tw){if(Set-Tweak $tw $true){$ok++}else{$failed.Add($tw.Name)}}
     }
-    Set-RegString 'HKCU:\Control Panel\Mouse' 'MouseSpeed' '0'
-    Set-RegString 'HKCU:\Control Panel\Mouse' 'MouseThreshold1' '0'
-    Set-RegString 'HKCU:\Control Panel\Mouse' 'MouseThreshold2' '0'
-    Show-Info 'Perfil Windows para jogos aplicado. HAGS continua separado para voce comparar ON/OFF, pois o melhor resultado depende da GPU e do driver.'
+    try{
+        foreach($name in @('MouseSpeed','MouseThreshold1','MouseThreshold2')){
+            [void](Set-RegString 'HKCU:\Control Panel\Mouse' $name '0')
+        }
+        $ok++
+    }catch{$failed.Add('Mouse');Report-Error 'Mouse' $_}
+    $message="Etapas confirmadas: $ok."
+    if($failed.Count){$message+=([Environment]::NewLine+'Falharam: '+($failed -join ', '))}
+    $message+=([Environment]::NewLine+'HAGS nao foi alterado. Compare FPS e frametime.')
+    Show-Info $message
 }
 function Apply-GameAll([int]$Width,[int]$Height){
-    if(!(Confirm ("Aplicar perfil Windows + Fortnite "+$Width+"x"+$Height+"? O Fortnite deve estar fechado."))){return}
+    if(!(Confirm ('Aplicar Windows + Fortnite '+$Width+'x'+$Height+'? Feche o Fortnite.'))){return}
     Apply-WindowsGamingProfile
     Apply-FortnitePerformance $Width $Height
 }
