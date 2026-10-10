@@ -22,7 +22,36 @@ jobs:
         run: |
           $tokens = $null
           $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'larq.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
+          $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'larq.ps1'), [ref]$tokens, [ref]$errors)
           foreach($err in $errors){ Write-Host ("ERRO: " + $err.Message + " em " + $err.Extent.StartLineNumber) }
           if($errors.Count -gt 0){ exit 1 }
           Write-Host 'Sintaxe PowerShell 5.1 valida.'
+
+          # Exercita funcoes seguras sem abrir GUI nem alterar o Windows do usuario.
+          foreach($name in @('Test-LarqPassword','Set-IniValue','Read-Reg','Save-RegOriginal','Set-RegVerified','Set-RegDword')){
+            $fn=$ast.Find({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name}, $true)
+            if(-not $fn){throw "Funcao obrigatoria ausente: $name"}
+            . ([scriptblock]::Create($fn.Extent.Text))
+          }
+          $testPassword='LarqSmokeTest_Only123'
+          $sha=[Security.Cryptography.SHA256]::Create()
+          try{$script:AuthHash=[Convert]::ToBase64String($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes('LarqOtimizer::v2::'+$testPassword)))}
+          finally{$sha.Dispose()}
+          if(-not (Test-LarqPassword $testPassword)){throw 'Login: senha de teste valida nao foi aceita.'}
+          if(Test-LarqPassword ($testPassword+'wrong')){throw 'Login: senha de teste invalida foi aceita.'}
+          $nl=[Environment]::NewLine
+          $ini='[/Script/FortniteGame.FortGameUserSettings]'+$nl+'bUseVSync=True'+$nl+'[ScalabilityGroups]'+$nl+'sg.ShadowQuality=3'+$nl
+          $ini=Set-IniValue $ini 'bUseVSync' 'False'
+          $ini=Set-IniValue $ini 'sg.ShadowQuality' '0'
+          if($ini -notmatch 'bUseVSync=False'){throw 'INI nao alterou VSync'}
+          if($ini -notmatch 'sg.ShadowQuality=0'){throw 'INI nao alterou qualidade'}
+          $script:OriginalReg=@{}
+          $regKey='HKCU:\Software\LarqOtimizer_CI_Test'
+          try{
+            [void](Set-RegDword $regKey 'SmokeTest' 42)
+            if((Read-Reg $regKey 'SmokeTest') -ne 42){throw 'O registro nao confirmou o valor gravado.'}
+          }finally{
+            Remove-Item $regKey -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          Write-Host 'Testes: login, INI e registro OK.'
+
